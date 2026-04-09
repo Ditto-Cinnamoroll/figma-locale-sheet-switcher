@@ -1,0 +1,8 @@
+{
+  "name": "locale-sheet-auth-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

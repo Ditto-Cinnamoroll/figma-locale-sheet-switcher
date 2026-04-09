@@ -1,0 +1,8 @@
+{
+  "name": "Locale Sheet Switcher GitHub",
+  "id": "locale-sheet-switcher-github-local",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"]
+}

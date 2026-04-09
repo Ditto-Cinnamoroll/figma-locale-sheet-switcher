@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Locale Sheet Switcher</title>
+  <style>
+    :root {
+      --bg: #f2f5f9;
+      --panel: #ffffff;
+      --line: #d8dfeb;
+      --text: #132238;
+      --muted: #66758d;
+      --brand: #0f766e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.13), transparent 28%),
+        linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+      color: var(--text);
+      font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 14px 36px rgba(19, 34, 56, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 16px;
+    }
+
+    .description, .hint, .meta {
+      color: var(--muted);
+    }
+
+    .description {
+      margin-bottom: 14px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .stat, .section {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fbfdff;
+    }
+
+    .stat { padding: 10px; }
+    .stat strong { display: block; font-size: 16px; margin-bottom: 2px; }
+
+    .section {
+      padding: 12px;
+      background: #fff;
+      margin-bottom: 12px;
+    }
+
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"], select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 11px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .primary { background: var(--brand); color: #fff; }
+    .secondary { background: #fff; color: var(--text); border-color: var(--line); }
+
+    .status {
+      min-height: 64px;
+      border-radius: 12px;
+      border: 1px dashed var(--line);
+      background: #fbfdff;
+      padding: 12px;
+      white-space: pre-wrap;
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #edf7f6;
+      color: #0f766e;
+      border: 1px solid #bce2dc;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Locale Sheet Switcher</h1>
+    <div class="description">
+      Sign in with your Google account through the internal OAuth bridge, read a private Google Sheet, and replace selected text layers by <code>msg-id</code>.
+    </div>
+
+    <div class="stats">
+      <div class="stat"><strong id="selectedCount">0</strong>Selected</div>
+      <div class="stat"><strong id="textCount">0</strong>Text</div>
+      <div class="stat"><strong id="namedTextCount">0</strong>msg-id</div>
+    </div>
+
+    <div class="actions" style="margin-bottom:12px;">
+      <button id="rescanBtn" class="secondary">Refresh Selection</button>
+      <div></div>
+    </div>
+
+    <div class="section">
+      <h2>1. Sign In</h2>
+      <label for="bridgeUrl">Auth Server URL</label>
+      <input id="bridgeUrl" type="text" value="http://localhost:4180" />
+      <div class="hint">
+        Enter the OAuth bridge server URL. Clicking sign in opens Google login in your browser.
+      </div>
+      <div class="actions">
+        <button id="signInBtn" class="primary">Sign In with Google</button>
+        <button id="signOutBtn" class="secondary">Sign Out</button>
+      </div>
+      <div id="authMeta" class="meta">Not signed in yet.</div>
+    </div>
+
+    <div class="section">
+      <h2>2. Sheet Connection & Apply</h2>
+      <label for="spreadsheetUrl">Spreadsheet URL</label>
+      <input
+        id="spreadsheetUrl"
+        type="text"
+        value=""
+      />
+      <div class="hint">
+        Paste the full spreadsheet link. The plugin automatically extracts the document ID.
+      </div>
+      <label for="sheetName" style="margin-top:10px;">Sheet Name</label>
+      <input id="sheetName" type="text" value="" />
+
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="modeSelect">Apply Mode</label>
+          <select id="modeSelect">
+            <option value="language">Apply Selected Language</option>
+            <option value="longest">Apply Longest Translation</option>
+          </select>
+        </div>
+        <div>
+          <label for="languageSelect">Language</label>
+          <select id="languageSelect">
+            <option value="">Load sheet first</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hint">
+        Apply Longest Translation compares all locales for each <code>msg-id</code> and uses the longest visible text after stripping HTML tags.
+      </div>
+
+      <div class="actions">
+        <button id="loadDataBtn" class="secondary">Load Sheet</button>
+        <button id="applyBtn" class="primary">Apply to Selection</button>
+      </div>
+      <div id="datasetMeta" class="meta" style="margin-top:8px;">No locale data loaded yet.</div>
+    </div>
+
+    <div id="status" class="status">Ready to sign in and load data from the spreadsheet link.</div>
+  </div>
+
+  <script>
+    const state = {
+      languages: [],
+      records: {},
+      sourceLabel: '',
+      settings: null,
+      authPollTimer: null
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(message, isError) {
+      const el = $('status');
+      el.textContent = message;
+      el.style.color = isError ? '#c2410c' : '#66758d';
+    }
+
+    function post(type, payload) {
+      parent.postMessage({ pluginMessage: { type: type, payload: payload } }, '*');
+    }
+
+    function collectSettings() {
+      return {
+        bridgeUrl: $('bridgeUrl').value.trim(),
+        spreadsheetUrl: $('spreadsheetUrl').value.trim(),
+        sheetName: $('sheetName').value.trim(),
+        authSessionId: state.settings && state.settings.authSessionId ? state.settings.authSessionId : '',
+        authEmail: state.settings && state.settings.authEmail ? state.settings.authEmail : ''
+      };
+    }
+
+    function hydrateSettings(settings) {
+      state.settings = settings;
+      $('bridgeUrl').value = settings.bridgeUrl || '';
+      $('spreadsheetUrl').value = settings.spreadsheetUrl || '';
+      $('sheetName').value = settings.sheetName || '';
+
+      if (settings.authEmail) {
+        $('authMeta').innerHTML =
+          '<span class="pill">Signed in: ' + escapeHtml(settings.authEmail) + '</span>';
+      } else {
+        $('authMeta').textContent = 'Not signed in yet.';
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function refreshLanguageOptions() {
+      const select = $('languageSelect');
+      const previous = select.value;
+      select.innerHTML = '';
+
+      if (state.languages.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Load sheet first';
+        select.appendChild(option);
+        return;
+      }
+
+      for (let i = 0; i < state.languages.length; i += 1) {
+        const language = state.languages[i];
+        const option = document.createElement('option');
+        option.value = language;
+        option.textContent = language;
+        select.appendChild(option);
+      }
+
+      select.value = state.languages.indexOf(previous) >= 0 ? previous : state.languages[0];
+    }
+
+    function applyDataset(dataset, sourceLabel) {
+      state.languages = dataset.languages || [];
+      state.records = dataset.records || {};
+      state.sourceLabel = sourceLabel || '';
+      refreshLanguageOptions();
+
+      const recordCount = Object.keys(state.records).length;
+      $('datasetMeta').innerHTML =
+        'Loaded: <strong>' + escapeHtml(state.sourceLabel) + '</strong><br>' +
+        'Languages ' + state.languages.length + ', msg-ids ' + recordCount;
+    }
+
+    function applyToSelection() {
+      if (Object.keys(state.records).length === 0) {
+        setStatus('Load locale data first.', true);
+        return;
+      }
+
+      const mode = $('modeSelect').value;
+      const language = $('languageSelect').value;
+      if (mode === 'language' && !language) {
+        setStatus('Choose a language first.', true);
+        return;
+      }
+
+      setStatus(
+        mode === 'longest'
+          ? 'Applying the longest translation for each msg-id...'
+          : 'Applying ' + language + ' to the current selection...'
+      );
+
+      post('apply-locale', {
+        mode: mode,
+        language: language,
+        records: state.records
+      });
+    }
+
+    function startAuthPolling(sessionId) {
+      stopAuthPolling();
+      state.authPollTimer = setInterval(function () {
+        const payload = collectSettings();
+        payload.authSessionId = sessionId;
+        post('check-auth-status', payload);
+      }, 2000);
+    }
+
+    function stopAuthPolling() {
+      if (state.authPollTimer) {
+        clearInterval(state.authPollTimer);
+        state.authPollTimer = null;
+      }
+    }
+
+    $('rescanBtn').onclick = function () {
+      setStatus('Refreshing selection details...');
+      post('inspect-selection');
+    };
+
+    $('signInBtn').onclick = function () {
+      setStatus('Starting Google sign-in in your browser...');
+      post('start-sign-in', collectSettings());
+    };
+
+    $('signOutBtn').onclick = function () {
+      stopAuthPolling();
+      setStatus('Signing out...');
+      post('sign-out');
+    };
+
+    $('loadDataBtn').onclick = function () {
+      setStatus('Loading the sheet using the signed-in account...');
+      post('load-locale-data', collectSettings());
+    };
+
+    $('applyBtn').onclick = function () {
+      applyToSelection();
+    };
+
+    $('modeSelect').onchange = function () {
+      $('languageSelect').disabled = $('modeSelect').value === 'longest';
+    };
+
+    onmessage = function (event) {
+      const message = event.data.pluginMessage;
+      if (!message) return;
+
+      if (message.type === 'init') {
+        hydrateSettings(message.payload.settings);
+        return;
+      }
+
+      if (message.type === 'selection-summary') {
+        const payload = message.payload;
+        $('selectedCount').textContent = String(payload.selectedCount);
+        $('textCount').textContent = String(payload.textCount);
+        $('namedTextCount').textContent = String(payload.namedTextCount);
+        if (payload.selectedCount === 0) {
+          setStatus('Select at least one frame, group, or text layer.');
+        }
+        return;
+      }
+
+      if (message.type === 'auth-pending') {
+        if (state.settings) state.settings.authSessionId = message.payload.authSessionId;
+        setStatus('Browser opened. Waiting for Google sign-in to finish...');
+        startAuthPolling(message.payload.authSessionId);
+        return;
+      }
+
+      if (message.type === 'auth-status') {
+        if (message.payload.status === 'authorized') {
+          stopAuthPolling();
+          if (!state.settings) state.settings = {};
+          state.settings.authSessionId = message.payload.authSessionId;
+          state.settings.authEmail = message.payload.email || '';
+          hydrateSettings(state.settings);
+          setStatus('Google sign-in complete. You can now load the private sheet.');
+        } else if (message.payload.status === 'error') {
+          stopAuthPolling();
+          setStatus(message.payload.error || 'An error occurred while completing sign-in.', true);
+        }
+        return;
+      }
+
+      if (message.type === 'auth-cleared') {
+        stopAuthPolling();
+        hydrateSettings(message.payload);
+        setStatus('Signed out.');
+        return;
+      }
+
+      if (message.type === 'locale-data') {
+        if (message.payload.ok) {
+          applyDataset(message.payload.dataset, message.payload.sourceLabel);
+          setStatus('Loaded locale data from the private Google Sheet.');
+        } else {
+          setStatus(message.payload.message || 'Failed to load locale data.', true);
+        }
+        return;
+      }
+
+      if (message.type === 'result') {
+        setStatus(message.payload.message, !message.payload.ok);
+      }
+    };
+  </script>
+</body>
+</html>
