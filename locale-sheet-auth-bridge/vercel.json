@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/oauth/google/callback", "destination": "/api/index.js" },
+    { "source": "/api/health", "destination": "/api/index.js" }
+  ]
+}
