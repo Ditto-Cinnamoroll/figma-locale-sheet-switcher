@@ -2,35 +2,32 @@
 
 Figma plugin for locale-driven mockup swaps using a companion OAuth bridge server.
 
-## Recommended Flow
+## How It Works
 
-1. Deploy `locale-sheet-auth-bridge/` to Vercel.
-2. Add your Google OAuth credentials and session-store environment variables in Vercel.
-3. Add the deployed callback URL to Google Cloud.
-4. Import this Figma plugin from `manifest.json`.
-5. Enter the deployed Vercel URL in `Auth Server URL`.
-6. Sign in with your own Google account.
-7. Paste the spreadsheet URL, load the sheet, and apply a language or the longest translation.
-
-## Why The Bridge Exists
-
-The plugin does not talk to Google Sheets directly.
-
-Instead:
-
-1. The plugin opens the bridge URL.
-2. Each designer signs in with their own Google account.
-3. The bridge exchanges the OAuth code and stores a short-lived session.
-4. The plugin loads locale JSON from the bridge.
+1. The plugin opens a company OAuth bridge server.
+2. Each designer signs in with their own Google account in the browser.
+3. The bridge server exchanges the OAuth code and stores a short-lived session.
+4. The plugin asks the bridge for locale JSON from the private Google Sheet.
 5. The plugin replaces text based on text layer `msg-id` names.
+
+## Plugin Usage
+
+1. Run the bridge server first.
+2. Import the Figma plugin from `manifest.json`.
+3. Enter the bridge URL, spreadsheet URL, and sheet name.
+4. Click `Sign In with Google`.
+5. Complete browser login with your own Google account.
+6. Click `Load Sheet`.
+7. Choose either a specific language or `Apply Longest Translation`.
+8. Click `Apply to Selection`.
 
 ## Bridge Server
 
-Bridge folder:
+Server folder:
 
 - `locale-sheet-auth-bridge/`
 
-For local development:
+Start it with:
 
 ```bash
 cd locale-sheet-auth-bridge
@@ -41,35 +38,25 @@ ALLOWED_EMAIL_DOMAIN=d8aspring.com \
 npm start
 ```
 
-For Vercel deployment, configure:
+Optional env vars:
 
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
+- `PORT`
+- `BASE_URL`
+- `GOOGLE_REDIRECT_URI`
 - `ALLOWED_EMAIL_DOMAIN`
-- `SESSION_TTL_SECONDS`
-- `UPSTASH_REDIS_REST_URL`
-- `UPSTASH_REDIS_REST_TOKEN`
-
-`KV_REST_API_URL` and `KV_REST_API_TOKEN` are also supported if your storage provider exposes Vercel-compatible variable names.
 
 ## Required Google OAuth Setup
 
-Create a Google OAuth client for a web application and add the deployed callback URL:
+Create a Google OAuth client for a web application and add the callback URL:
 
-- `https://YOUR_VERCEL_DOMAIN/oauth/google/callback`
+- `http://localhost:4180/oauth/google/callback`
+
+Required Google scope:
+
+- `https://www.googleapis.com/auth/spreadsheets.readonly`
+- `https://www.googleapis.com/auth/userinfo.email`
 
 Also make sure `Google Sheets API` is enabled in the same Google Cloud project.
-
-## Plugin Usage
-
-1. Import the Figma plugin from `manifest.json`.
-2. Enter the deployed HTTPS bridge URL.
-3. Click `Sign In with Google`.
-4. Complete browser login with your own Google account.
-5. Paste the spreadsheet URL and enter the sheet name.
-6. Click `Load Sheet`.
-7. Choose either a specific language or `Apply Longest Translation`.
-8. Click `Apply to Selection`.
 
 ## Bridge Response Shape
 

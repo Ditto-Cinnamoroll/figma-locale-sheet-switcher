@@ -2,7 +2,7 @@ const SETTINGS_KEY = 'locale-sheet-switcher-settings-v3';
 const DEFAULT_SPREADSHEET_URL = '';
 
 const DEFAULT_SETTINGS = {
-  bridgeUrl: '',
+  bridgeUrl: 'http://localhost:4180',
   spreadsheetUrl: DEFAULT_SPREADSHEET_URL,
   spreadsheetId: '',
   sheetName: '',

@@ -1,77 +1,31 @@
 import { createServer } from "node:http";
-import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 const PORT = Number(process.env.PORT || 4180);
-const BASE_URL = process.env.BASE_URL || "";
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || `${BASE_URL}/oauth/google/callback`;
 const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "";
-const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 60 * 60 * 6);
-const SESSION_PREFIX = "locale-sheet-session:";
 
-const REDIS_REST_URL =
-  process.env.UPSTASH_REDIS_REST_URL ||
-  process.env.KV_REST_API_URL ||
-  "";
-const REDIS_REST_TOKEN =
-  process.env.UPSTASH_REDIS_REST_TOKEN ||
-  process.env.KV_REST_API_TOKEN ||
-  "";
-
-const memorySessions =
-  globalThis.__localeSheetBridgeSessions ||
-  (globalThis.__localeSheetBridgeSessions = new Map());
+const sessions = new Map();
 
 function json(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
   });
   res.end(JSON.stringify(payload));
 }
 
 function html(res, status, content) {
-  res.writeHead(status, {
-    "Content-Type": "text/html; charset=utf-8",
-    "Access-Control-Allow-Origin": "*"
-  });
+  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
   res.end(content);
 }
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch (_error) {
-    return null;
-  }
-}
-
-function normalizeCell(value) {
-  return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
-}
-
-function stripTrailingSlash(value) {
-  return String(value || "").replace(/\/+$/, "");
-}
-
-function resolveBaseUrl(req) {
-  if (BASE_URL) return stripTrailingSlash(BASE_URL);
-
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const protocol =
-    typeof forwardedProto === "string" && forwardedProto ? forwardedProto.split(",")[0] : "http";
-  const host = req.headers.host || `localhost:${PORT}`;
-  return `${protocol}://${host}`;
-}
-
 function parseUrl(req) {
-  return new URL(req.url || "/", resolveBaseUrl(req));
-}
-
-function getGoogleRedirectUri(req) {
-  return process.env.GOOGLE_REDIRECT_URI || `${resolveBaseUrl(req)}/oauth/google/callback`;
+  return new URL(req.url || "/", BASE_URL);
 }
 
 function ensureConfig() {
@@ -80,86 +34,12 @@ function ensureConfig() {
   }
 }
 
-function sessionKey(sessionId) {
-  return `${SESSION_PREFIX}${sessionId}`;
-}
-
-function usesRedisStore() {
-  return Boolean(REDIS_REST_URL && REDIS_REST_TOKEN);
-}
-
-async function redisCommand(command) {
-  const response = await fetch(REDIS_REST_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${REDIS_REST_TOKEN}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(command)
-  });
-
-  const text = await response.text();
-  const data = safeJsonParse(text);
-
-  if (!response.ok) {
-    throw new Error(`Redis command failed (${response.status}): ${text}`);
-  }
-
-  if (data && data.error) {
-    throw new Error(`Redis error: ${data.error}`);
-  }
-
-  return data ? data.result : null;
-}
-
-async function persistSession(session) {
-  const serialized = JSON.stringify(session);
-
-  if (usesRedisStore()) {
-    await redisCommand(["SET", sessionKey(session.sessionId), serialized, "EX", SESSION_TTL_SECONDS]);
-    return;
-  }
-
-  memorySessions.set(session.sessionId, session);
-}
-
-async function loadSession(sessionId) {
-  if (usesRedisStore()) {
-    const raw = await redisCommand(["GET", sessionKey(sessionId)]);
-    if (!raw) {
-      const error = new Error("Session not found");
-      error.statusCode = 404;
-      throw error;
-    }
-    const session = typeof raw === "string" ? safeJsonParse(raw) : raw;
-    if (!session) {
-      const error = new Error("Stored session is invalid");
-      error.statusCode = 500;
-      throw error;
-    }
-    return session;
-  }
-
-  const session = memorySessions.get(sessionId);
-  if (!session) {
-    const error = new Error("Session not found");
-    error.statusCode = 404;
-    throw error;
-  }
-  return session;
-}
-
-async function updateSession(sessionId, updater) {
-  const session = await loadSession(sessionId);
-  const next = updater ? updater(session) || session : session;
-  await persistSession(next);
-  return next;
-}
-
-async function createSession() {
+function createSession() {
+  const sessionId = randomUUID();
+  const state = randomUUID();
   const session = {
-    sessionId: randomUUID(),
-    state: randomUUID(),
+    sessionId,
+    state,
     status: "pending",
     createdAt: Date.now(),
     accessToken: "",
@@ -168,15 +48,24 @@ async function createSession() {
     email: "",
     error: ""
   };
-
-  await persistSession(session);
+  sessions.set(sessionId, session);
   return session;
 }
 
-function authUrlForSession(session, req) {
+function getSession(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    const error = new Error("Session not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  return session;
+}
+
+function authUrlForSession(session) {
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: getGoogleRedirectUri(req),
+    redirect_uri: GOOGLE_REDIRECT_URI,
     response_type: "code",
     scope: [
       "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -186,16 +75,15 @@ function authUrlForSession(session, req) {
     prompt: "consent",
     state: `${session.sessionId}:${session.state}`
   });
-
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
-async function exchangeCodeForToken(code, req) {
+async function exchangeCodeForToken(code) {
   const body = new URLSearchParams({
     code,
     client_id: GOOGLE_CLIENT_ID,
     client_secret: GOOGLE_CLIENT_SECRET,
-    redirect_uri: getGoogleRedirectUri(req),
+    redirect_uri: GOOGLE_REDIRECT_URI,
     grant_type: "authorization_code"
   });
 
@@ -240,14 +128,12 @@ async function refreshAccessToken(session) {
 
   session.accessToken = data.access_token;
   session.expiresAt = Date.now() + Number(data.expires_in || 3600) * 1000;
-  await persistSession(session);
 }
 
 async function ensureAccessToken(session) {
   if (session.accessToken && session.expiresAt - Date.now() > 60 * 1000) {
     return session.accessToken;
   }
-
   await refreshAccessToken(session);
   return session.accessToken;
 }
@@ -258,11 +144,9 @@ async function fetchUserEmail(accessToken) {
   });
   const text = await response.text();
   const data = safeJsonParse(text);
-
   if (!response.ok || !data || !data.email) {
     throw new Error(`Failed to fetch user info (${response.status}): ${text}`);
   }
-
   return data.email;
 }
 
@@ -278,9 +162,7 @@ async function fetchSheetValues(accessToken, spreadsheetId, sheetName) {
   const range = `${sheetName}!A:Y`;
   const response = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    }
+    { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   const text = await response.text();
   const data = safeJsonParse(text);
@@ -292,11 +174,8 @@ async function fetchSheetValues(accessToken, spreadsheetId, sheetName) {
   return Array.isArray(data.values) ? data.values : [];
 }
 
-function findMsgIdColumnIndex(headerRow, rows) {
-  const directIndex = headerRow.findIndex((cell) => normalizeCell(cell).toLowerCase() === "msg-id");
-  if (directIndex >= 0) return directIndex;
-  const firstDataRow = rows[1] || [];
-  return firstDataRow.findIndex((cell) => normalizeCell(cell).toLowerCase() === "msg-id");
+function normalizeCell(value) {
+  return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
 }
 
 function parseLocaleRows(rows) {
@@ -347,63 +226,22 @@ function parseLocaleRows(rows) {
   };
 }
 
-function renderOauthDonePage(status, title, message) {
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-    <style>
-      body {
-        margin: 0;
-        font-family: Inter, system-ui, sans-serif;
-        background: #f3f6fb;
-        color: #17324d;
-      }
-      main {
-        max-width: 560px;
-        margin: 56px auto;
-        padding: 32px;
-        border-radius: 24px;
-        background: #ffffff;
-        box-shadow: 0 18px 48px rgba(22, 46, 74, 0.12);
-      }
-      .badge {
-        display: inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-        background: ${status === "success" ? "#d9f6e6" : "#ffe0db"};
-        color: ${status === "success" ? "#0f7a43" : "#b43c29"};
-      }
-      h1 {
-        margin: 16px 0 12px;
-        font-size: 28px;
-        line-height: 1.15;
-      }
-      p {
-        margin: 0;
-        font-size: 15px;
-        line-height: 1.6;
-        color: #51657a;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <div class="badge">${status === "success" ? "Connected" : "Action needed"}</div>
-      <h1>${title}</h1>
-      <p>${message}</p>
-    </main>
-  </body>
-</html>`;
+function findMsgIdColumnIndex(headerRow, rows) {
+  const directIndex = headerRow.findIndex((cell) => normalizeCell(cell).toLowerCase() === "msg-id");
+  if (directIndex >= 0) return directIndex;
+  const firstDataRow = rows[1] || [];
+  return firstDataRow.findIndex((cell) => normalizeCell(cell).toLowerCase() === "msg-id");
 }
 
-export async function handleNodeRequest(req, res) {
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return null;
+  }
+}
+
+createServer(async (req, res) => {
   try {
     if (!req.url) {
       json(res, 400, { error: "Bad request" });
@@ -418,29 +256,23 @@ export async function handleNodeRequest(req, res) {
     }
 
     if (url.pathname === "/api/health") {
-      json(res, 200, {
-        ok: true,
-        baseUrl: resolveBaseUrl(req),
-        usesRedisStore: usesRedisStore()
-      });
+      json(res, 200, { ok: true });
       return;
     }
 
     if (url.pathname === "/api/auth/start" && req.method === "POST") {
       ensureConfig();
-      const session = await createSession();
-
+      const session = createSession();
       json(res, 200, {
         sessionId: session.sessionId,
-        authUrl: authUrlForSession(session, req)
+        authUrl: authUrlForSession(session)
       });
       return;
     }
 
     if (url.pathname.startsWith("/api/auth/session/") && req.method === "GET") {
       const sessionId = decodeURIComponent(url.pathname.split("/").pop() || "");
-      const session = await loadSession(sessionId);
-
+      const session = getSession(sessionId);
       json(res, 200, {
         status: session.status,
         email: session.email,
@@ -453,51 +285,40 @@ export async function handleNodeRequest(req, res) {
       ensureConfig();
       const state = url.searchParams.get("state") || "";
       const code = url.searchParams.get("code") || "";
-      const oauthError = url.searchParams.get("error") || "";
-      const parts = state.split(":");
+      const error = url.searchParams.get("error") || "";
 
+      const parts = state.split(":");
       if (parts.length !== 2) {
         throw new Error("Invalid OAuth state");
       }
 
-      const session = await loadSession(parts[0]);
+      const session = getSession(parts[0]);
       if (session.state !== parts[1]) {
         throw new Error("OAuth state mismatch");
       }
 
-      if (oauthError) {
-        await updateSession(session.sessionId, (current) => {
-          current.status = "error";
-          current.error = oauthError;
-          return current;
-        });
-
-        html(
-          res,
-          400,
-          renderOauthDonePage("error", "Google sign-in failed", "You can return to Figma and try again.")
-        );
+      if (error) {
+        session.status = "error";
+        session.error = error;
+        html(res, 400, "<h1>Google login failed</h1><p>You can return to Figma.</p>");
         return;
       }
 
-      const tokenData = await exchangeCodeForToken(code, req);
+      const tokenData = await exchangeCodeForToken(code);
       const email = await fetchUserEmail(tokenData.access_token);
       assertAllowedEmail(email);
 
-      await updateSession(session.sessionId, (current) => {
-        current.status = "authorized";
-        current.accessToken = tokenData.access_token;
-        current.refreshToken = tokenData.refresh_token || current.refreshToken || "";
-        current.expiresAt = Date.now() + Number(tokenData.expires_in || 3600) * 1000;
-        current.email = email;
-        current.error = "";
-        return current;
-      });
+      session.status = "authorized";
+      session.accessToken = tokenData.access_token;
+      session.refreshToken = tokenData.refresh_token || session.refreshToken || "";
+      session.expiresAt = Date.now() + Number(tokenData.expires_in || 3600) * 1000;
+      session.email = email;
+      session.error = "";
 
       html(
         res,
         200,
-        renderOauthDonePage("success", "Google sign-in complete", "You can return to Figma and continue.")
+        "<h1>Google login complete</h1><p>You can return to Figma and continue.</p>"
       );
       return;
     }
@@ -506,13 +327,12 @@ export async function handleNodeRequest(req, res) {
       const sessionId = url.searchParams.get("sessionId") || "";
       const spreadsheetId = url.searchParams.get("spreadsheetId") || "";
       const sheetName = url.searchParams.get("sheetName") || "";
-
       if (!sessionId || !spreadsheetId || !sheetName) {
         json(res, 400, { error: "sessionId, spreadsheetId, and sheetName are required" });
         return;
       }
 
-      const session = await loadSession(sessionId);
+      const session = getSession(sessionId);
       if (session.status !== "authorized") {
         json(res, 401, { error: "Session is not authorized" });
         return;
@@ -530,14 +350,6 @@ export async function handleNodeRequest(req, res) {
     const statusCode = error.statusCode || 500;
     json(res, statusCode, { error: error.message || "Server error" });
   }
-}
-
-const isDirectRun =
-  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-
-if (isDirectRun) {
-  createServer(handleNodeRequest).listen(PORT, () => {
-    const baseUrl = BASE_URL || `http://localhost:${PORT}`;
-    console.log(`Locale auth bridge running at ${baseUrl}`);
-  });
-}
+}).listen(PORT, () => {
+  console.log(`Locale auth bridge running at ${BASE_URL}`);
+});
